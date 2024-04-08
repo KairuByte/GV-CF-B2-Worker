@@ -4,8 +4,8 @@ This is a cloudflare worker configuration for use in front of a GameVault server
 
 - A free Cloudflare account
 - An owned domain with DNS records pointing to your gamevault server on Cloudflare
-- GameVault server set up and configured
-- GameVault server exposed to the open internet (cloudflare tunnels work just fine)
+- A GameVault server set up and configured
+  - GameVault server exposed to the open internet (cloudflare tunnels work just fine)
 - A Backblaze B2 account
 - Game files mirrored onto the B2 account.
   - Optionally, you can use rclone to mount the B2 bucket on the GameVault server, to cut down on the work.
