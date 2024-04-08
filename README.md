@@ -1,17 +1,17 @@
 # Requirements
 
-- Cloudflare account
-- Owned domain
-- GameVault set up and configured
-- GameVault exposed to the open internet (cloudflare tunnels work just fine)
+- A free Cloudflare account
+- An owned domain with DNS records pointing to your gamevault server on Cloudflare
+- GameVault server set up and configured
+- GameVault server exposed to the open internet (cloudflare tunnels work just fine)
 
 # Steps to use
 
 1. Create a new cloudflare worker [here](https://dash.cloudflare.com/?to=/:account/workers)
 2. Edit the worker settings as follows:
-    1. Set the route of the worker to `[gamevault base domain]/api/games/*`.
+    1. Set the route (in Settings>Triggers) of the worker to `[gamevault base domain]/api/games/*`.
        - You likely want to disable the default route.
-    2. Create the following variables:
+    2. Create the following variables (in Settings>Variables):
         | Variable name | Value | Required? |
         | --- | --- | --- |
         | B2_APPLICATION_KEY	| Your B2 application key, encrypted. | Required |
