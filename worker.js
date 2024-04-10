@@ -21,6 +21,9 @@ const UNSIGNABLE_HEADERS = [
 const HTTPS_PROTOCOL = "https:";
 const HTTPS_PORT = "443";
 
+// Gamevault defaults
+const GV_GAME_FOLDER = "files" // The folder where games are stored within the docker container
+
 // How many times to retry a range request where the response is missing content-range
 const RANGE_RETRY_ATTEMPTS = 3;
 
@@ -52,24 +55,21 @@ export default {
         // Authorize the user against the GV API. We don't check against /download
         // because we need to get the filename from the API call one level higher.
         var auth_url = new URL(request.url.slice(0, -9));
-        // This line is mostly unnecessary.
-        auth_url.hostname = env.GV_HOSTNAME;
 
         var auth_response = await fetch(auth_url, { headers: request.headers });
 
         // We are checking the response of the /game/[id] API. If it's anything
-        // other than 200, simply spit out the response. This should likely
-        // kick out the response of /download but that would add execution time.
-        if (auth_response.status != 200)
-            return auth_response;
+        // other than 200, let GameVault handle the communication.
+        if (!auth_response.ok)
+            return fetch(request);
 
         // Grab the file name from the auth check response.
         var auth_json = await auth_response.json();
         var filepath = auth_json.file_path.toString().slice(1);
 
         // GV stores all game files in /files
-        if (filepath.startsWith("files/"))
-            filepath = filepath.slice(6);
+        if (filepath.startsWith(GV_GAME_FOLDER))
+            filepath = filepath.slice(GV_GAME_FOLDER.length + 1);
         // Rclone can have the bucket name as the folder at it's root.
         if (filepath.startsWith(env.BUCKET_NAME))
             filepath = filepath.slice(env.BUCKET_NAME.length + 1);
@@ -161,15 +161,22 @@ export default {
             return response;
         }
 
-        // If the discord webhook is configured, push the username and file details.
-        if (env.DISCORD_WEBHOOK)
-            await fetch(env.DISCORD_WEBHOOK, {
-                method: 'POST',
-                body: JSON.stringify({ content: `${user} has started downloading ${auth_json.title} [${filepath}]` }),
-                headers: new Headers({ "Content-Type": "application/json" }),
-            });
+        try {
+            // If the discord webhook is configured, push the username and file details.
+            if (env.DISCORD_WEBHOOK)
+                await fetch(env.DISCORD_WEBHOOK, {
+                    method: 'POST',
+                    body: JSON.stringify({ content: `${user} has started downloading ${auth_json.title} [${filepath}]` }),
+                    headers: new Headers({ "Content-Type": "application/json" }),
+                });
 
-        // Send the signed request to B2, returning the upstream response
+            // Send the signed request to B2, returning the upstream response
+        }
+        catch (error) {
+            console.error('Error sending notification to Discord:', error);
+        }
+
+        // Return the signed request fetch
         return fetch(signedRequest);
     },
 };
