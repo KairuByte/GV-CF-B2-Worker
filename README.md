@@ -25,6 +25,5 @@ This is a cloudflare worker configuration for use in front of a GameVault server
         | BUCKET_NAME | Your B2 bucket name | Required |
         | DISCORD_WEBHOOK | Your discord webhook to push download stats to. | Optional |
         | GV_FOLDER | The folder inside your bucket where GV games are stored | Required |
-        | GV_HOSTNAME | The hostname of your GameVault server. | Required |
 6. Replace the workers code with `worker.js` within this repo
 7. Upload a copy of [aws4fetch.cjs.js](https://github.com/mhart/aws4fetch) alongside `worker.js`
