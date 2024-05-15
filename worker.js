@@ -4,7 +4,7 @@
 // Adapted from https://github.com/backblaze-b2-samples/cloudflare-b2
 //
 
-import { AwsClient } from 'aws4fetch.cjs.js' // Uploaded alongside worker.js from https://github.com/mhart/aws4fetch
+import { AwsClient } from 'aws4fetch.esm.js' // Uploaded alongside worker.js from https://github.com/mhart/aws4fetch
 
 const UNSIGNABLE_HEADERS = [
     // These headers appear in the request, but are not passed upstream
@@ -17,15 +17,17 @@ const UNSIGNABLE_HEADERS = [
     'accept-encoding',
 ];
 
+console.log("logging works");
+
 // URL needs colon suffix on protocol, and port as a string
 const HTTPS_PROTOCOL = "https:";
 const HTTPS_PORT = "443";
 
-// Gamevault defaults
-const GV_GAME_FOLDER = "files" // The folder where games are stored within the docker container
-
 // How many times to retry a range request where the response is missing content-range
-const RANGE_RETRY_ATTEMPTS = 3;
+const RETRY_ON_RANGE_ATTEMPTS = 3;
+
+// How many times to retry a range request where the response was a 500/503 error
+const RETRY_ON_500_ATTEMPTS = 3;
 
 // Filter out cf-* and any other headers we don't want to include in the signature
 function filterHeaders(headers, env) {
@@ -68,8 +70,8 @@ export default {
         var filepath = auth_json.file_path.toString().slice(1);
 
         // GV stores all game files in /files
-        if (filepath.startsWith(GV_GAME_FOLDER))
-            filepath = filepath.slice(GV_GAME_FOLDER.length + 1);
+        if (filepath.startsWith(env.GV_INTERNAL_FOLDER))
+            filepath = filepath.slice(env.GV_INTERNAL_FOLDER.length + 1);
         // Rclone can have the bucket name as the folder at it's root.
         if (filepath.startsWith(env.BUCKET_NAME))
             filepath = filepath.slice(env.BUCKET_NAME.length + 1);
@@ -85,10 +87,10 @@ export default {
 
         // Remove trailing and leading slashes from path
         let path = url.pathname;
-        if(path.startsWith('/'))
+        if (path.startsWith('/'))
             path = path.slice(1);
-        if(path.endsWith('/'))
-            path = path.slice(0,-1);
+        if (path.endsWith('/'))
+            path = path.slice(0, -1);
 
         // Bucket name must be specified in the BUCKET_NAME variable
         url.hostname = env.BUCKET_NAME + "." + env.B2_ENDPOINT;
@@ -123,7 +125,9 @@ export default {
         // content-range header. If not, abort the request and try again.
         // See https://community.cloudflare.com/t/cloudflare-worker-fetch-ignores-byte-request-range-on-initial-request/395047/4
         if (signedRequest.headers.has("range")) {
-            let attempts = RANGE_RETRY_ATTEMPTS;
+            let range_attempts = RETRY_ON_RANGE_ATTEMPTS;
+            let attempts = RETRY_ON_500_ATTEMPTS;
+
             let response;
             do {
                 let controller = new AbortController();
@@ -134,26 +138,51 @@ export default {
                 });
                 if (response.headers.has("content-range")) {
                     // Only log if it didn't work first time
-                    if (attempts < RANGE_RETRY_ATTEMPTS) {
+                    if (range_attempts < RETRY_ON_RANGE_ATTEMPTS) {
                         console.log(`Retry for ${signedRequest.url} succeeded - response has content-range header`);
                     }
+                    
+                    try {
+                        // If the discord webhook is configured, push the username and file details.
+                        if (env.DISCORD_WEBHOOK)
+                            await fetch(env.DISCORD_WEBHOOK, {
+                                method: 'POST',
+                                body: JSON.stringify({ content: `${user} has started downloading ${auth_json.title} [${filepath}]` }),
+                                headers: new Headers({ "Content-Type": "application/json" }),
+                            });
+                    }
+                    catch (error) {
+                        console.error('Error sending notification to Discord:', error);
+                    }
+
                     // Break out of loop and return the response
                     break;
                 } else if (response.ok) {
-                    attempts -= 1;
-                    console.error(`Range header in request for ${signedRequest.url} but no content-range header in response. Will retry ${attempts} more times`);
+                    range_attempts -= 1;
+                    console.error(`Range header in request for ${signedRequest.url} but no content-range header in response. Will retry ${range_attempts} more times`);
                     // Do not abort on the last attempt, as we want to return the response
-                    if (attempts > 0) {
+                    if (range_attempts > 0) {
+                        controller.abort();
+                    }
+                } else if ([500, 503].includes(response.status)) {
+                    attempts -= 1;
+                    console.error(`${response.status} error encountered on ${signedRequest.url}. Will retry ${attempts} more times`);
+                    // After the second 500 error, wait half a second
+                    if (RETRY_ON_500_ATTEMPTS - 2 == attempts) {
+                        await new Promise(r => setTimeout(() => r(), 500));
+                    }
+                    // Do not abort on the last attempt, as we want to return the response
+                    if (range_attempts > 0) {
                         controller.abort();
                     }
                 } else {
                     // Response is not ok, so don't retry
                     break;
                 }
-            } while (attempts > 0);
+            } while (range_attempts > 0 && attempts > 0);
 
-            if (attempts <= 0) {
-                console.error(`Tried range request for ${signedRequest.url} ${RANGE_RETRY_ATTEMPTS} times, but no content-range in response.`);
+            if (range_attempts <= 0) {
+                console.error(`Tried range request for ${signedRequest.url} ${RETRY_ON_RANGE_ATTEMPTS} times, but no content-range in response.`);
             }
 
             // Return whatever response we have rather than an error response
@@ -161,22 +190,46 @@ export default {
             return response;
         }
 
-        try {
-            // If the discord webhook is configured, push the username and file details.
-            if (env.DISCORD_WEBHOOK)
-                await fetch(env.DISCORD_WEBHOOK, {
-                    method: 'POST',
-                    body: JSON.stringify({ content: `${user} has started downloading ${auth_json.title} [${filepath}]` }),
-                    headers: new Headers({ "Content-Type": "application/json" }),
-                });
+        let response;
+        let attempts = RETRY_ON_500_ATTEMPTS;
+        do {
+            let controller = new AbortController();
+            response = await fetch(signedRequest);
 
-            // Send the signed request to B2, returning the upstream response
-        }
-        catch (error) {
-            console.error('Error sending notification to Discord:', error);
-        }
+            if (response.ok) {
+                try {
+                    // If the discord webhook is configured, push the username and file details.
+                    if (env.DISCORD_WEBHOOK)
+                        await fetch(env.DISCORD_WEBHOOK, {
+                            method: 'POST',
+                            body: JSON.stringify({ content: `${user} has started downloading ${auth_json.title} [${filepath}]` }),
+                            headers: new Headers({ "Content-Type": "application/json" }),
+                        });
+                }
+                catch (error) {
+                    console.error('Error sending notification to Discord:', error);
+                }
 
-        // Return the signed request fetch
-        return fetch(signedRequest);
+                // Send the signed request to B2, returning the upstream response
+                return response;
+            } else if ([500, 503].includes(response.status)) {
+                attempts -= 1;
+                console.error(`${response.status} error encountered on ${signedRequest.url}. Will retry ${attempts} more times`);
+                // After the second 500 error, wait half a second
+                if (RETRY_ON_500_ATTEMPTS - 2 == attempts) {
+                    await new Promise(r => setTimeout(r, 500));
+                }
+                // Do not abort on the last attempt, as we want to return the response
+                if (attempts > 0) {
+                    controller.abort();
+                }
+            } else {
+                // Response is not ok, so don't retry
+                break;
+            }
+
+            return response;
+        }
+        while (attempts < 0);
     },
 };

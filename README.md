@@ -17,13 +17,14 @@ This is a cloudflare worker configuration for use in front of a GameVault server
     1. Set the route (in Settings>Triggers) of the worker to `[gamevault base domain]/api/games/*`.
        - You likely want to disable the default route.
     2. Create the following variables (in Settings>Variables):
-        | Variable name | Value | Required? |
-        | --- | --- | --- |
-        | B2_APPLICATION_KEY	| Your B2 application key, encrypted. | Required |
-        | B2_APPLICATION_KEY_ID | Your B2 application key ID. | Required |
-        | B2_ENDPOINT | Your S3 endpoint - e.g. s3.us-west-001.backblazeb2.com | Required |
-        | BUCKET_NAME | Your B2 bucket name | Required |
-        | DISCORD_WEBHOOK | Your discord webhook to push download stats to. | Optional |
-        | GV_FOLDER | The folder inside your bucket where GV games are stored | Required |
+        | Variable name | Value | Example | Required? |
+        | --- | --- | --- | --- |
+        | B2_APPLICATION_KEY	| Your B2 application key, encrypted. | ~00123b4567df3c60000000007~ | Required |
+        | B2_APPLICATION_KEY_ID | Your B2 application key ID. | ~K001mcp0RsiEJe/Viw90bvjkZZPzRSE~ | Required |
+        | B2_ENDPOINT | Your S3 endpoint | s3.us-west-001.backblazeb2.com | Required |
+        | BUCKET_NAME | Your B2 bucket name | GameVault | Required |
+        | DISCORD_WEBHOOK | Your discord webhook to push download stats to. | https://discord.com/api/webhooks/{webhook.id}/{webhook.token} | Optional |
+        | GV_FOLDER | The folder inside your bucket where GV games are stored. Needs leading and trailing slash.  | `/` or `/gamevault/` | Required |
+        | GV_INTERNAL_FOLDER | The internal gamevault folder. You can check this by looking in your game API response. | `files` for Docker; `games` for TrueNAS | Required |
 6. Replace the workers code with `worker.js` within this repo
-7. Upload a copy of [aws4fetch.cjs.js](https://github.com/mhart/aws4fetch) alongside `worker.js`
+7. Upload a copy of [aws4fetch.esm.js](https://github.com/mhart/aws4fetch) alongside `worker.js`
