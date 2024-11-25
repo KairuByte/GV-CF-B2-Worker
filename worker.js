@@ -13,11 +13,9 @@ const UNSIGNABLE_HEADERS = [
     // We can't include accept-encoding in the signature because Cloudflare
     // sets the incoming accept-encoding header to "gzip, br", then modifies
     // the outgoing request to set accept-encoding to "gzip".
-    // Not cool, Cloudflare! 
+    // Not cool, Cloudflare!
     'accept-encoding',
 ];
-
-console.log("logging works");
 
 // URL needs colon suffix on protocol, and port as a string
 const HTTPS_PROTOCOL = "https:";
@@ -39,8 +37,68 @@ function filterHeaders(headers, env) {
         ));
 }
 
+let discordWebhookUrl;
+
+async function notifyDiscord(message) {
+    try {
+        if (discordWebhookUrl)
+            await fetch(discordWebhookUrl, {
+                method: 'POST',
+                body: JSON.stringify({ content: message }),
+                headers: new Headers({ "Content-Type": "application/json" }),
+            });
+    }
+    catch (error) {
+        console.error('Error sending notification to Discord:', error);
+    }
+}
+
+let logLevel;
+const logLevels = {
+    ERROR: 0,
+    WARN: 1,
+    INFO: 2,
+    DEBUG: 3,
+    TRACE: 4,
+    ALL: 5
+};
+
+async function log(message, severity) {
+    // Handle console logging based on severity
+    switch (severity) {
+        case logLevels.ERROR:
+            console.error(message);
+            break;
+        case logLevels.WARN:
+            console.warn(message);
+            break;
+        case logLevels.INFO:
+            console.info(message);
+            break;
+        case logLevels.DEBUG:
+            console.debug(message);
+            break;
+        default:
+            console.log(message); // Fallback to console.log
+            break;
+    }
+
+    if (logLevel >= severity) {
+        notifyDiscord(message);
+    }
+}
+
+function parseLogLevel(levelString) {
+    // Convert the string to uppercase to match the keys in logLevels
+    const level = levelString.toUpperCase();
+    return logLevels[level] !== undefined ? logLevels[level] : 2; // Default to INFO
+}
+
 export default {
     async fetch(request, env) {
+        discordWebhookUrl = env.DISCORD_WEBHOOK; // Store the webhook URL globally
+        logLevel = parseLogLevel(env.LOG_LEVEL); // Store the log level globally
+
         const url = new URL(request.url);
 
         if (!url.pathname.endsWith("/download"))
@@ -139,34 +197,24 @@ export default {
                 if (response.headers.has("content-range")) {
                     // Only log if it didn't work first time
                     if (range_attempts < RETRY_ON_RANGE_ATTEMPTS) {
-                        console.log(`Retry for ${signedRequest.url} succeeded - response has content-range header`);
+                        log(`Retry for ${signedRequest.url} succeeded - response has content-range header`, logLevels.DEBUG);
                     }
-                    
-                    try {
-                        // If the discord webhook is configured, push the username and file details.
-                        if (env.DISCORD_WEBHOOK)
-                            await fetch(env.DISCORD_WEBHOOK, {
-                                method: 'POST',
-                                body: JSON.stringify({ content: `${user} has started downloading ${auth_json.title} [${filepath}]` }),
-                                headers: new Headers({ "Content-Type": "application/json" }),
-                            });
-                    }
-                    catch (error) {
-                        console.error('Error sending notification to Discord:', error);
-                    }
+
+                    // If the discord webhook is configured, push the username and file details.
+                    log(`${user} has started downloading ${auth_json.title} [${filepath}]`, logLevels.INFO)
 
                     // Break out of loop and return the response
                     break;
                 } else if (response.ok) {
                     range_attempts -= 1;
-                    console.error(`Range header in request for ${signedRequest.url} but no content-range header in response. Will retry ${range_attempts} more times`);
+                    log(`Range header in request for ${signedRequest.url} but no content-range header in response. Will retry ${range_attempts} more times`, logLevels.ERROR);
                     // Do not abort on the last attempt, as we want to return the response
                     if (range_attempts > 0) {
                         controller.abort();
                     }
                 } else if ([500, 503].includes(response.status)) {
                     attempts -= 1;
-                    console.error(`${response.status} error encountered on ${signedRequest.url}. Will retry ${attempts} more times`);
+                    log(`${response.status} error encountered on ${signedRequest.url}. Will retry ${attempts} more times`, logLevels.ERROR);
                     // After the second 500 error, wait half a second
                     if (RETRY_ON_500_ATTEMPTS - 2 == attempts) {
                         await new Promise(r => setTimeout(() => r(), 500));
@@ -182,7 +230,7 @@ export default {
             } while (range_attempts > 0 && attempts > 0);
 
             if (range_attempts <= 0) {
-                console.error(`Tried range request for ${signedRequest.url} ${RETRY_ON_RANGE_ATTEMPTS} times, but no content-range in response.`);
+                log(`Tried range request for ${signedRequest.url} ${RETRY_ON_RANGE_ATTEMPTS} times, but no content-range in response.`, logLevels.ERROR);
             }
 
             // Return whatever response we have rather than an error response
@@ -197,24 +245,14 @@ export default {
             response = await fetch(signedRequest);
 
             if (response.ok) {
-                try {
-                    // If the discord webhook is configured, push the username and file details.
-                    if (env.DISCORD_WEBHOOK)
-                        await fetch(env.DISCORD_WEBHOOK, {
-                            method: 'POST',
-                            body: JSON.stringify({ content: `${user} has started downloading ${auth_json.title} [${filepath}]` }),
-                            headers: new Headers({ "Content-Type": "application/json" }),
-                        });
-                }
-                catch (error) {
-                    console.error('Error sending notification to Discord:', error);
-                }
+                // If the discord webhook is configured, push the username and file details.
+                log(`${user} has started downloading ${auth_json.title} [${filepath}]`, logLevels.INFO)
 
                 // Send the signed request to B2, returning the upstream response
                 return response;
             } else if ([500, 503].includes(response.status)) {
                 attempts -= 1;
-                console.error(`${response.status} error encountered on ${signedRequest.url}. Will retry ${attempts} more times`);
+                log(`${response.status} error encountered on ${signedRequest.url}. Will retry ${attempts} more times`, logLevels.ERROR);
                 // After the second 500 error, wait half a second
                 if (RETRY_ON_500_ATTEMPTS - 2 == attempts) {
                     await new Promise(r => setTimeout(r, 500));
