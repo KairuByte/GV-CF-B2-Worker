@@ -26,5 +26,17 @@ This is a cloudflare worker configuration for use in front of a GameVault server
         | DISCORD_WEBHOOK | Your discord webhook to push download stats to. | https://discord.com/api/webhooks/{webhook.id}/{webhook.token} | Optional |
         | GV_FOLDER | The folder inside your bucket where GV games are stored. Needs leading and trailing slash.  | `/` or `/gamevault/` | Required |
         | GV_INTERNAL_FOLDER | The internal gamevault folder. You can check this by looking in your game API response. | `files` for Docker; `games` for TrueNAS | Required |
+        | LOG_LEVEL | The log level to output to Discord. | `INFO` | Optional |
 6. Replace the workers code with `worker.js` within this repo
 7. Upload a copy of [aws4fetch.esm.js](https://github.com/mhart/aws4fetch) alongside `worker.js`
+
+# Log Level
+
+The only log levels in place are `ERROR`, `INFO` and `DEBUG`.
+
+The full list is as follows:
+- `ERROR`
+- `WARN`
+- `INFO`
+- `DEBUG`
+- `TRACE`
